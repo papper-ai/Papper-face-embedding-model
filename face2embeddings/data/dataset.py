@@ -8,8 +8,8 @@ import torch
 
 
 class Arc2FaceDataset(Dataset):
-    def __init__(self, path_to_dataset: Path, transform: v2 = None):
-        self.image_paths, self.labels = self.found_images(path_to_dataset)
+    def __init__(self, path_to_dataset: Path, transform: v2 = None, length: int = -1):
+        self.image_paths, self.labels = self.found_images(path_to_dataset, length)
         self.transform = (
             v2.Compose(
                 [
@@ -30,36 +30,44 @@ class Arc2FaceDataset(Dataset):
         )
 
     @staticmethod
-    def found_images(path_to_dataset: Path) -> tuple[list[list[Path]], list[Path]]:
+    def found_images(
+        path_to_dataset: Path, length: int = -1
+    ) -> tuple[list[list[Path]], list[Path]]:
         temp_paths = list()
         previous_folder = None
         paths = list()
         folders = list()
         total_images = 0
         for image in path_to_dataset.glob("**/*.jpg"):
-            if image.parent == previous_folder:
-                temp_paths.append(image)
-                previous_folder = image.parent
+            if length != -1 and len(paths) <= length:
+                if image.parent == previous_folder:
+                    temp_paths.append(image)
+                    previous_folder = image.parent
+                else:
+                    if previous_folder is not None:
+                        paths.append(temp_paths)
+                        folders.append(previous_folder)
+                        total_images += len(temp_paths)
+                        temp_paths.clear()
+                    temp_paths.append(image)
+                    previous_folder = image.parent
             else:
-                if previous_folder is not None:
-                    paths.append(temp_paths)
-                    folders.append(previous_folder)
-                    total_images += len(temp_paths)
-                    temp_paths.clear()
-                temp_paths.append(image)
-                previous_folder = image.parent
+                break
 
         return paths, folders
 
-    def __getitem__(self, idx) -> tuple[Image, Image, int]:
+    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         images_class = random.choice([0, 1])
 
         # if image class is 1, then select two random images from the one folder, else select two full random image
         if images_class:
             image_folder1 = self.image_paths[idx]
             image1_path = random.choice(image_folder1)
-            while image1_path == (image2_path := random.choice(image_folder1)):
-                continue
+            if len(image_folder1) > 1:
+                while image1_path == (image2_path := random.choice(image_folder1)):
+                    continue
+            else:
+                image2_path = image1_path
             image1 = Image.open(image1_path)
             image2 = Image.open(image2_path)
         else:
@@ -75,7 +83,7 @@ class Arc2FaceDataset(Dataset):
         image1 = self.transform(image1)
         image2 = self.transform(image2)
 
-        return image1, image2, images_class
+        return image1, image2, torch.tensor(images_class, dtype=torch.float32)
 
     def __len__(self):
         return len(self.image_paths)
