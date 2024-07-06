@@ -1,30 +1,35 @@
+import numpy as np
 from PIL import Image
 from torch.utils.data import Dataset
 from pathlib import Path
 import random
-from torchvision.models import Swin_V2_S_Weights
+from torchvision.models import Swin_V2_B_Weights
 from torchvision.transforms import v2
 import torch
+import copy
 
 
 class Arc2FaceDataset(Dataset):
-    def __init__(self, path_to_dataset: Path, transform: v2 = None, length: int = -1):
-        self.image_paths, self.labels = self.found_images(path_to_dataset, length)
+    def __init__(
+        self, path_to_dataset: Path, transforms: v2.Compose = None, length: int = -1
+    ):
+        self.image_paths, self.folders = self.found_images(path_to_dataset, length)
+        swin_transforms = Swin_V2_B_Weights.DEFAULT.transforms()
         self.transform = (
             v2.Compose(
                 [
                     v2.ToImage(),
                     v2.ToDtype(torch.float32, scale=True),
-                    Swin_V2_S_Weights.DEFAULT.transforms(),
+                    swin_transforms,
                 ]
             )
-            if transform is None
+            if transforms is None
             else v2.Compose(
                 [
                     v2.ToImage(),
                     v2.ToDtype(torch.float32, scale=True),
-                    transform,
-                    Swin_V2_S_Weights.DEFAULT.transforms(),
+                    transforms,
+                    swin_transforms,
                 ]
             )
         )
@@ -32,58 +37,71 @@ class Arc2FaceDataset(Dataset):
     @staticmethod
     def found_images(
         path_to_dataset: Path, length: int = -1
-    ) -> tuple[list[list[Path]], list[Path]]:
-        temp_paths = list()
+    ) -> tuple[list[np.ndarray], np.ndarray]:
+        folder_img_paths = []
+        dataset_img_paths = []
+        folders = []
         previous_folder = None
-        paths = list()
-        folders = list()
-        total_images = 0
         for image in path_to_dataset.glob("**/*.jpg"):
-            if length != -1 and len(paths) <= length:
+            if length != -1:
+                if len(dataset_img_paths) <= length:
+                    if image.parent == previous_folder:
+                        folder_img_paths.append(image)
+                        previous_folder = image.parent
+                    else:
+                        if previous_folder is not None:
+                            dataset_img_paths.append(
+                                copy.deepcopy(
+                                    np.array(list(map(str, folder_img_paths)))
+                                )
+                            )
+                            folders.append(str(previous_folder))
+                            folder_img_paths.clear()
+                        folder_img_paths.append(image)
+                        previous_folder = image.parent
+                else:
+                    break
+            else:
                 if image.parent == previous_folder:
-                    temp_paths.append(image)
+                    folder_img_paths.append(image)
                     previous_folder = image.parent
                 else:
                     if previous_folder is not None:
-                        paths.append(temp_paths)
-                        folders.append(previous_folder)
-                        total_images += len(temp_paths)
-                        temp_paths.clear()
-                    temp_paths.append(image)
+                        dataset_img_paths.append(
+                            copy.deepcopy(np.array(list(map(str, folder_img_paths))))
+                        )
+                        folders.append(str(previous_folder))
+                        folder_img_paths.clear()
+                    folder_img_paths.append(image)
                     previous_folder = image.parent
-            else:
-                break
 
-        return paths, folders
+        return dataset_img_paths, np.array(folders)
 
     def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        images_class = random.choice([0, 1])
+        image_folder1 = self.image_paths[idx]
+        filtered_indices = [i for i in range(len(self.image_paths)) if i != idx]
+        image_folder2 = self.image_paths[random.choice(filtered_indices)]
 
-        # if image class is 1, then select two random images from the one folder, else select two full random image
-        if images_class:
-            image_folder1 = self.image_paths[idx]
-            image1_path = random.choice(image_folder1)
-            if len(image_folder1) > 1:
-                while image1_path == (image2_path := random.choice(image_folder1)):
-                    continue
-            else:
-                image2_path = image1_path
-            image1 = Image.open(image1_path)
-            image2 = Image.open(image2_path)
-        else:
-            image_folder1 = self.image_paths[idx]
-            image_folder2 = self.image_paths[
-                random.randint(0, len(self.image_paths) - 1)
-            ]
-            image1_path = random.choice(image_folder1)
-            image2_path = random.choice(image_folder2)
-            image1 = Image.open(image1_path)
-            image2 = Image.open(image2_path)
+        image1_path = np.random.choice(image_folder1)
+        image2_path = (
+            np.random.choice(image_folder1[image_folder1 != image1_path])
+            if len(image_folder1) > 1
+            else image1_path
+        )
+        image3_path = np.random.choice(image_folder2)
 
-        image1 = self.transform(image1)
-        image2 = self.transform(image2)
+        image1 = Image.open(image1_path)
+        image2 = Image.open(image2_path)
+        image3 = Image.open(image3_path)
 
-        return image1, image2, torch.tensor(images_class, dtype=torch.float32)
+        t_image1 = self.transform(image1)
+        t_image2 = self.transform(image2)
+        t_image3 = self.transform(image3)
+
+        return t_image1, t_image2, t_image3
 
     def __len__(self):
         return len(self.image_paths)
+
+    def __str__(self):
+        return "Arc2FaceDataset"

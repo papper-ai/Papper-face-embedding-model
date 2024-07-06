@@ -22,19 +22,27 @@ def show(imgs: torch.Tensor | list[torch.Tensor], labels: list | str | None = No
         img = F.to_pil_image(img)
         ax.imshow(np.asarray(img))
         if labels is not None:
-            ax.set_title(str(i))
+            if isinstance(labels, list):
+                if len(labels) < i:
+                    label = labels[-1]
+                else:
+                    label = labels[i]
+            if isinstance(labels, str):
+                label = labels
+            ax.set_title(label)
+
         ax.set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
 
 
 def create_writer(
-    experiment_name: str, model_name: str, extra: str = None
+    experiment_name: str, extra: str = None
 ) -> torch.utils.tensorboard.writer.SummaryWriter():
     timestamp = datetime.now().strftime("%Y-%m-%d")
 
     if extra:
-        log_dir = os.path.join("runs", timestamp, experiment_name, model_name, extra)
+        log_dir = os.path.join("runs", timestamp, experiment_name, extra)
     else:
-        log_dir = os.path.join("runs", timestamp, experiment_name, model_name)
+        log_dir = os.path.join("runs", timestamp, experiment_name)
 
     print(f"[INFO] Created SummaryWriter, saving to: {log_dir}...")
     return SummaryWriter(log_dir=log_dir)
